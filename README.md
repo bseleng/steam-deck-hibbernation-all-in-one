@@ -28,7 +28,7 @@ Based on the [nazar256 hibernation guide](https://github.com/nazar256/publicatio
 ```bash
 mkdir -p ~/.local/bin
 curl -o ~/.local/bin/steamdeck-hibernate.sh \
-  https://raw.githubusercontent.com/YOUR_USERNAME/steamdeck-hibernation/main/steamdeck-hibernate.sh
+  https://raw.githubusercontent.com/bseleng/steam-deck-hibbernation-all-in-one/main/steamdeck-hibernate.sh
 chmod +x ~/.local/bin/steamdeck-hibernate.sh
 cd ~/.local/bin
 ```
