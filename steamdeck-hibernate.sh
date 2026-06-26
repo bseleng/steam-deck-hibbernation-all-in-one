@@ -1354,7 +1354,7 @@ cmd_self_test() {
     if [[ "$ext" -eq 1 ]]; then
       _st_ok "Swapfile is contiguous (1 extent)"
     else
-      _st_fail "Swapfile has ${ext} extents — may cause resume failure. Re-create: sudo $0 install"
+      _st_fail "Swapfile has ${ext} extents — may cause resume failure. Fix: sudo $0 fix-swapfile"
     fi
   fi
 
@@ -1565,6 +1565,79 @@ cmd_check_prereqs() {
     err "${failures} critical check(s) FAILED — address them before running install."
   fi
   (( failures == 0 ))
+}
+
+# ── Swapfile recreation ───────────────────────────────────────────────────────
+# Use when self-test reports >1 extent. Deletes and recreates the swapfile to
+# get a single contiguous extent, then updates GRUB (resume_offset changes).
+cmd_fix_swapfile() {
+  require_root
+  step "Recreate swapfile for contiguous layout (hibernation reliability)"
+
+  local extents
+  extents="$(filefrag "$SWAPFILE" 2>/dev/null | grep -oE '[0-9]+ extent' | awk '{print $1}')"
+  extents="${extents:-0}"
+
+  if [[ "$extents" -eq 1 ]]; then
+    ok "Swapfile already contiguous (1 extent) — nothing to do."
+    return 0
+  fi
+
+  [[ "$extents" -gt 1 ]] \
+    && warn "Swapfile has ${extents} extents — will recreate." \
+    || warn "Could not determine extent count — proceeding anyway."
+
+  # Space check: need SWAP_SIZE_GIB free AFTER removing the existing swapfile.
+  local want_bytes=$(( SWAP_SIZE_GIB * 1024 * 1024 * 1024 ))
+  local mp; mp="$(findmnt -no TARGET -T "$SWAPFILE")"
+  local avail_kib; avail_kib="$(df -Pk "$mp" | awk 'NR==2{print $4}')"
+  local have_kib; have_kib=$(( $(current_swap_bytes) / 1024 ))
+  local effective_kib=$(( avail_kib + have_kib ))
+  local need_kib=$(( want_bytes / 1024 ))
+  if [[ "$effective_kib" -lt "$need_kib" ]]; then
+    die "Not enough free space on $mp to recreate a ${SWAP_SIZE_GiB} GiB swapfile. \
+Free up space first (need $(numfmt --to=iec "$want_bytes" 2>/dev/null) free)."
+  fi
+  info "Free space (including swapfile): $(numfmt --to=iec $(( effective_kib * 1024 )) 2>/dev/null) — sufficient."
+
+  warn "This will briefly disable swap. Close memory-heavy apps first."
+  confirm "Recreate swapfile?" || { info "Cancelled."; return 0; }
+
+  # Disable and delete
+  run swapoff "$SWAPFILE" 2>/dev/null || true
+  run rm -f "$SWAPFILE"
+
+  # Recreate — fallocate is faster than dd and produces a contiguous file
+  # when enough space is available. Fall back to dd if fallocate fails.
+  if command -v fallocate >/dev/null 2>&1; then
+    run fallocate -l "${SWAP_SIZE_GIB}G" "$SWAPFILE" \
+      || { warn "fallocate failed, falling back to dd...";
+           run dd if=/dev/zero of="$SWAPFILE" bs=1G count="$SWAP_SIZE_GIB" \
+               status=progress conv=fsync; }
+  else
+    run dd if=/dev/zero of="$SWAPFILE" bs=1G count="$SWAP_SIZE_GIB" \
+        status=progress conv=fsync
+  fi
+  run chmod 600 "$SWAPFILE"
+  run mkswap "$SWAPFILE"
+  run swapon "$SWAPFILE"
+
+  # Verify
+  local new_extents
+  new_extents="$(filefrag "$SWAPFILE" 2>/dev/null | grep -oE '[0-9]+ extent' | awk '{print $1}')"
+  new_extents="${new_extents:-?}"
+  if [[ "$new_extents" == "1" ]]; then
+    ok "Swapfile is now contiguous (1 extent)."
+  else
+    warn "Swapfile still has ${new_extents} extents — disk may be too fragmented."
+    warn "Try: fstrim -v /home && sudo $0 fix-swapfile"
+  fi
+
+  # resume_offset changes after recreation — must update GRUB and reboot
+  info "Updating GRUB resume_offset (changes after swapfile recreation)..."
+  configure_grub
+  ok "Done. You MUST REBOOT for the new resume_offset to take effect."
+  warn "▶ sudo reboot"
 }
 
 # ── BIOS tips ─────────────────────────────────────────────────────────────────
@@ -1809,6 +1882,7 @@ cmd_reapply() {
 
   configure_sleep_conf
   install_bluetooth_fix
+  install_persist_hook   # also updates ExecStart path if it changed
   # Never auto-redirect suspend here — leave that to explicit user action.
 }
 
@@ -1923,6 +1997,10 @@ COMMANDS:
   fix-wake <DEV>  Persistently disable one ACPI wake source (e.g. XHC0).
                   Find device names in /proc/acpi/wakeup.
 
+  fix-swapfile    Recreate swapfile as a single contiguous extent (fixes resume
+                  failures caused by fragmentation). Updates GRUB offset after.
+                  Requires ~${SWAP_SIZE_GIB} GiB free space. REBOOT after.
+
   fix-wifi-wake   Disable WiFi/XHC ACPI wakeup via tmpfiles.d, and print
                   instructions for the WPA-supplicant Steam developer setting.
                   Also checks mem_sleep mode (must be 'deep', not 's2idle').
@@ -2022,6 +2100,7 @@ main() {
     test-suspend)   cmd_test_suspend ;;
     diagnose-wake)  cmd_diagnose_wake "$@" ;;
     fix-wake)       cmd_fix_wake "$@" ;;
+    fix-swapfile)         cmd_fix_swapfile ;;
     fix-wifi-wake)        cmd_fix_wifi_wake ;;
     disable-all-wakeup)  cmd_disable_all_wakeup ;;
     test-hibernate)      cmd_test_hibernate "$@" ;;

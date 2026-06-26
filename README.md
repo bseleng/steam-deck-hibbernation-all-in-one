@@ -111,6 +111,7 @@ From this point, every suspend (lid close / sleep button) will suspend first, th
 | `test-hibernate` | Trigger real hibernation |
 | `enable-sth` | Make every suspend = suspend-then-hibernate |
 | `disable-sth` | Revert to plain suspend |
+| `fix-swapfile` | Recreate swapfile as a single contiguous extent (then reboot) |
 | `fix-wifi-wake` | Disable WiFi/XHC wakeup, check mem_sleep mode |
 | `fix-wake <DEV>` | Disable one specific ACPI wakeup device |
 | `disable-all-wakeup` | Nuclear: disable all wakeup except power button |
@@ -159,6 +160,14 @@ journalctl -u fix-bluetooth-resume.service --since "-5 min"
 
 **"Failed to boot" screen after several hibernation cycles**
 The GRUB boot counter fix (installed by default) prevents this. If it appears anyway, select "Current" — it is cosmetic.
+
+**Deck boots fresh instead of resuming session (resume fails silently)**
+The swapfile is likely fragmented. `self-test` will report the extent count. Fix:
+```bash
+sudo ./steamdeck-hibernate.sh fix-swapfile
+sudo reboot
+```
+Requires ~20 GiB free on `/home`. After recreation the `resume_offset` changes — GRUB is updated automatically, but a reboot is required.
 
 **Deck won't resume from hibernate (black screen)**
 Hold power for 10 seconds to force reboot. The hibernation image is discarded and the deck boots normally. This is recoverable.
