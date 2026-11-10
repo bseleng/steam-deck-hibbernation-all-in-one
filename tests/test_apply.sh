@@ -81,10 +81,10 @@ rm "$SUSPEND_LINK"
 # First extent must contain the logical header and use PAGE_SIZE units.
 getconf() { printf '4096\n'; }
 findmnt() { printf '%s\n' "$RESUME_UUID"; }
-filefrag() { [[ $1 == -b && $2 == 4096 && $3 == -v ]]; printf ' 0: 0.. 1023: 12345.. 13368: 1024: last,eof\n'; }
+filefrag() { [[ $# == 3 && $1 == -b4096 && $2 == -v && $3 == "$SWAPFILE" ]] || return 64; printf ' 0: 0.. 1023: 12345.. 13368: 1024: last,eof\n'; }
 resume_values
 [[ $RESUME_OFFSET == 12345 ]]
-pass 'resume offset requests PAGE_SIZE and resolves logical page zero'
+pass 'filefrag receives attached PAGE_SIZE argument and resolves logical page zero'
 filefrag() { printf ' 0: 4.. 1023: 12345.. 13368: 1024: last,eof\n'; }
 reject resume_values
 pass 'sparse swap header rejected'

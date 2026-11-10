@@ -108,6 +108,14 @@ bash tests/test_apply.sh
 bash tests/test_boot_success.sh
 ```
 
+Отдельная Linux-проверка вызывает настоящий `filefrag` на небольшом временном файле и сверяет offset с независимым измерением в байтах. Она не включает swap и не меняет системные настройки:
+
+```bash
+docker run --rm --network none \
+  -v "$PWD:/project:ro" -w /project \
+  node:24.22.2-bookworm-slim bash tests/test_filefrag_linux.sh
+```
+
 Полный тест применения использует файловую систему **одноразового Linux-контейнера**, подменяя аппаратные и системные команды. На Steam Deck этот тест запускать нельзя:
 
 ```bash

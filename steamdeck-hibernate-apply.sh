@@ -206,7 +206,8 @@ resume_values() {
   RESUME_UUID=$(findmnt -n -o UUID -T "$SWAPFILE")
   [[ $RESUME_UUID =~ ^[a-fA-F0-9-]+$ ]] || fail 'Invalid swap backing filesystem UUID'
   # Kernel resume_offset is in PAGE_SIZE units, not filesystem-block units.
-  RESUME_OFFSET=$(LC_ALL=C filefrag -b "$page_size" -v "$SWAPFILE" | awk '
+  # filefrag uses getopt with an optional -b value: it MUST be attached.
+  RESUME_OFFSET=$(LC_ALL=C filefrag -b"$page_size" -v "$SWAPFILE" | awk '
     $1=="0:" {
       if ($2!="0.." || $4 !~ /^[0-9]+\.\.$/ || $0 ~ /unwritten|delalloc|unknown_loc|inline/) exit 42
       split($4,a,"."); print a[1]; found=1

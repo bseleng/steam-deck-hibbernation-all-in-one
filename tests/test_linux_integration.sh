@@ -44,7 +44,7 @@ source "$PROJECT/steamdeck-hibernate-apply.sh"
 # main apply sequence, file writes, settings, copies and failures remain real.
 preflight() { assert_trusted_state; }
 findmnt() { printf '12345678-abcd-1234-5678-123456789abc\n'; }
-filefrag() { printf ' 0: 0.. 1023: 12345.. 13368: 1024: last,eof\n'; }
+filefrag() { [[ $# == 3 && $1 == -b4096 && $2 == -v && $3 == /home/swapfile ]] || return 64; printf ' 0: 0.. 1023: 12345.. 13368: 1024: last,eof\n'; }
 blkid() { printf 'swap\n'; }
 swapon() {
   if [[ ${1:-} == --show=NAME ]]; then
