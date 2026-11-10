@@ -99,12 +99,43 @@ printf '%s\n' 'linux /vmlinuz resume=UUID=12345678-abcd-1234-5678-123456789abc r
 grub_has_resume
 pass 'generated exact resume token pair accepted'
 
+# SteamOS wraps the actual kernel command in steamenv_boot. This fixture
+# reproduces the first on-device failure, with synthetic filesystem identifiers.
+cp "$PROJECT/tests/fixtures/steamos-steamenv-grub.cfg" "$GRUB_CFG"
+grub_has_linux "$GRUB_CFG"
+grub_has_resume
+pass 'real SteamOS steamenv_boot Linux entries detected and resume validated'
+for command in linux linuxefi 'steamenv_boot linux' 'steamenv_boot linuxefi'; do
+  printf '%s /vmlinuz resume=UUID=%s resume_offset=%s\n' "$command" "$RESUME_UUID" "$RESUME_OFFSET" > "$GRUB_CFG"
+  grub_has_linux "$GRUB_CFG"
+  grub_has_resume
+done
+pass 'direct and SteamOS-wrapped linux/linuxefi commands supported'
+printf '%s\n' 'steamenv_boot linux /vmlinuz resume=UUID=12345678-abcd-1234-5678-123456789abc' > "$GRUB_CFG"
+grub_has_linux "$GRUB_CFG"
+reject grub_has_resume
+pass 'wrapped Linux command still requires the correct resume offset'
+printf '%s\n' 'steamenv_boot linux /vmlinuz quiet' 'steamenv_boot linux /old resume=UUID=12345678-abcd-1234-5678-123456789abc resume_offset=12345' > "$GRUB_CFG"
+reject grub_has_resume
+pass 'correct wrapped old entry cannot hide a stale current entry'
+printf '%s\n' '# steamenv_boot linux /vmlinuz resume=UUID=12345678-abcd-1234-5678-123456789abc resume_offset=12345' 'echo steamenv_boot linux /vmlinuz' 'configfile /EFI/steamos/grub.cfg' > "$GRUB_CFG"
+reject grub_has_linux "$GRUB_CFG"
+reject grub_has_resume
+pass 'comments, echo strings and forwarding stubs are not kernel commands'
+printf '%s\n' 'steamenv_boot chainloader /other.efi' 'arbitrary_wrapper linux /vmlinuz' > "$GRUB_CFG"
+reject grub_has_linux "$GRUB_CFG"
+pass 'only the known SteamOS wrapper may precede a Linux command'
+printf '%s\n' 'steamenv_boot linux /vmlinuz quiet # resume=UUID=12345678-abcd-1234-5678-123456789abc resume_offset=12345' > "$GRUB_CFG"
+grub_has_linux "$GRUB_CFG"
+reject grub_has_resume
+pass 'resume tokens in trailing comments cannot satisfy validation'
+
 # Detect the real generated config, ignoring forwarding stubs.
 CANDIDATES="$TMP/efi-grub.cfg
 $TMP/boot-grub.cfg"
 supported_grub_configs() { printf '%s\n' "$CANDIDATES"; }
 update-grub() { if [[ ${1:-} == --help ]]; then printf 'Usage: update-grub\n'; return 0; fi; return 17; }
-printf '%s\n' 'linux /vmlinuz quiet' > "$TMP/efi-grub.cfg"
+cp "$PROJECT/tests/fixtures/steamos-steamenv-grub.cfg" "$TMP/efi-grub.cfg"
 printf '%s\n' 'configfile /EFI/SteamOS/grub.cfg' > "$TMP/boot-grub.cfg"
 detect_grub_config
 [[ $GRUB_CFG == "$TMP/efi-grub.cfg" ]]

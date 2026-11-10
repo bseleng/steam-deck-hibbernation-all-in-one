@@ -235,11 +235,33 @@ render_grub() {
   ' "$GRUB_FILE"
 }
 
+grub_linux_commands() {
+  # SteamOS 10_linux emits "steamenv_boot linux ...". Normalize only this
+  # known wrapper or a direct Linux command; never evaluate GRUB expressions.
+  awk '
+    {
+      first=1
+      if ($first=="steamenv_boot") first++
+      if (($first!="linux" && $first!="linuxefi") || NF<=first) next
+      if ($(first+1) ~ /^#/) next
+      for (i=first;i<=NF;i++) {
+        if ($i ~ /^#/) break
+        printf "%s%s", (i==first ? "" : " "), $i
+      }
+      printf "\n"
+    }
+  ' "$1"
+}
+
+grub_has_linux() {
+  grub_linux_commands "$1" | awk 'NF {found=1} END {exit !found}'
+}
+
 grub_has_resume() {
   # Match both exact tokens on the SAME generated Linux command, not comments
   # or a resume argument in some unrelated menu entry.
-  awk -v uuid="$RESUME_UUID" -v offset="$RESUME_OFFSET" '
-    $1=="linux" || $1=="linuxefi" {
+  grub_linux_commands "$GRUB_CFG" | awk -v uuid="$RESUME_UUID" -v offset="$RESUME_OFFSET" '
+    {
       device=0; position=0; recovery=0
       for (i=2;i<=NF;i++) if ($i=="noresume" || $i=="single" || $i=="recovery" || $i=="systemd.unit=rescue.target") recovery=1
       if (recovery) next
@@ -252,7 +274,7 @@ grub_has_resume() {
       if (!device || !position) bad=1
     }
     END {exit (!found || bad)}
-  ' "$GRUB_CFG" 2>/dev/null
+  '
 }
 
 supported_grub_configs() {
@@ -280,7 +302,7 @@ detect_grub_config() {
   fi
   if [[ -z $found ]]; then
     while IFS= read -r candidate; do
-      if [[ -f $candidate && ! -L $candidate ]] && awk '$1=="linux" || $1=="linuxefi" {found=1} END {exit !found}' "$candidate"; then
+      if [[ -f $candidate && ! -L $candidate ]] && grub_has_linux "$candidate"; then
         # FAT paths can differ only by case or mount aliases. Count each file once.
         if [[ -z $found || ! $candidate -ef $found ]]; then
           found=$candidate
@@ -291,7 +313,7 @@ detect_grub_config() {
     (( count == 1 )) || fail 'Cannot uniquely identify generated GRUB config (missing, forwarding-only, or ambiguous boot layout)'
   fi
   [[ -f $found && ! -L $found && -r $found ]] || fail "Generated GRUB configuration is missing or unsafe: $found"
-  awk '$1=="linux" || $1=="linuxefi" {found=1} END {exit !found}' "$found" || fail "GRUB configuration has no Linux boot command: $found"
+  grub_has_linux "$found" || fail "GRUB configuration has no supported Linux boot command (linux/linuxefi or steamenv_boot linux/linuxefi): $found"
   if (( ! DRY_RUN )); then
     [[ -w $found && -w $(dirname "$found") ]] || fail "GRUB configuration is not writable: $found"
   fi

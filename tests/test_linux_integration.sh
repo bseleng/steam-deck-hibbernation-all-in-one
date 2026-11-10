@@ -8,7 +8,7 @@ PROJECT=$(cd "$(dirname "$0")/.." && pwd)
 export PROJECT
 mkdir -p /etc/default /boot/grub /efi/EFI/steamos /home /tmp/deck-test /etc/sysctl.d
 printf 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"\n' > /etc/default/grub
-printf 'linux /vmlinuz quiet\n' > /efi/EFI/steamos/grub.cfg
+printf 'steamenv_boot   linux /vmlinuz quiet\n' > /efi/EFI/steamos/grub.cfg
 printf 'configfile /EFI/steamos/grub.cfg\n' > /boot/grub/grub.cfg
 printf '# original fstab\n' > /etc/fstab
 truncate -s 16G /home/swapfile
@@ -74,7 +74,7 @@ update-grub() {
   if [[ -f /tmp/deck-test/fail-grub ]]; then
     printf 'truncated\n' > /efi/EFI/steamos/grub.cfg; return 17
   fi
-  printf 'linux /vmlinuz quiet resume=UUID=%s resume_offset=%s\n' "$RESUME_UUID" "$RESUME_OFFSET" > /efi/EFI/steamos/grub.cfg
+  printf 'steamenv_boot   linux /vmlinuz quiet resume=UUID=%s resume_offset=%s\n' "$RESUME_UUID" "$RESUME_OFFSET" > /efi/EFI/steamos/grub.cfg
 }
 runtime_resume_matches() { [[ -f /tmp/deck-test/runtime-ready ]]; }
 main "$@"
@@ -127,7 +127,7 @@ grep -q updated_os=1 /etc/default/grub
 [[ -f /etc/systemd/system/systemd-hibernate.service.d/steamdeck-boot-success.conf ]]
 printf 'ok - simulated SteamOS update restores settings and services\n'
 # A stale current boot entry cannot be hidden by a correct older entry.
-printf 'linux /vmlinuz quiet\nlinux /old resume=UUID=12345678-abcd-1234-5678-123456789abc resume_offset=12345\n' > /efi/EFI/steamos/grub.cfg
+printf 'steamenv_boot linux /vmlinuz quiet\nsteamenv_boot linux /old resume=UUID=12345678-abcd-1234-5678-123456789abc resume_offset=12345\n' > /efi/EFI/steamos/grub.cfg
 reject_apply --check
 run_apply
 # Dry run from healthy state and drift state changes zero configuration bytes.
