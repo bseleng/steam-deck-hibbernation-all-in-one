@@ -177,4 +177,14 @@ run_apply --no-sth
 run_apply --boot
 [[ ! -e /etc/systemd/system/systemd-suspend.service.d/steamdeck-hibernate.conf ]]
 printf 'ok - subprocess failure propagation, GRUB rollback, no-STH preference retained\n'
+# The configured delay must be visible to the user after apply AND --check.
+run_apply --delay 15min
+grep -Fq 'HibernateDelaySec=15min (saved; effective sleep configuration verified)' /tmp/deck-test/output
+run_apply --check
+grep -Fq 'HibernateDelaySec=15min (saved value matches effective sleep configuration)' /tmp/deck-test/output
+run_apply --dry-run --delay 2h
+grep -Fq 'Requested HibernateDelaySec=2h (dry-run; not applied)' /tmp/deck-test/output
+grep -Fxq 'delay=15min' /var/lib/steamdeck-hibernate/settings
+grep -Fxq 'HibernateDelaySec=15min' /etc/systemd/sleep.conf.d/zzz-steamdeck-hibernate.conf
+printf 'ok - apply/check display verified delay; dry-run displays intent and preserves saved delay\n'
 printf 'PASS: Linux full reconciliation integration\n'

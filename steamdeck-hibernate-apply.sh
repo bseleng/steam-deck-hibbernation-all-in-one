@@ -623,6 +623,13 @@ main() {
   fi
   if ! runtime_resume_matches; then REBOOT_REQUIRED=1; fi
   if (( CHECK_ONLY && REBOOT_REQUIRED )); then fail 'Reboot required: running kernel resume arguments differ'; fi
+  if (( CHECK_ONLY )); then
+    info "HibernateDelaySec=$DELAY (saved value matches effective sleep configuration)"
+  elif (( DRY_RUN )); then
+    info "Requested HibernateDelaySec=$DELAY (dry-run; not applied)"
+  else
+    info "HibernateDelaySec=$DELAY (saved; effective sleep configuration verified)"
+  fi
   if (( DRY_RUN )); then info 'Read-only inspection complete'
   elif (( REBOOT_REQUIRED )); then info 'Settings applied. Reboot required: sudo reboot (no automatic reboot).'
   else info 'Hibernation settings reconciled. Physical hibernate/resume still requires verification on the Deck.'; fi
