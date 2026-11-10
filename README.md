@@ -1,191 +1,118 @@
-# steamdeck-hibernation
+# Steam Deck: восстановление гибернации одной командой
 
-Automated suspend-then-hibernate setup for Steam Deck (OLED/LCD) with ext4 `/home`.
-
-Based on the [nazar256 hibernation guide](https://github.com/nazar256/publications/blob/main/guides/steam-deck-hibernation.md).
-
-> **No warranty.** Hibernation is unsupported by Valve. A wrong `resume_offset` will prevent resume (recoverable via USB recovery stick). Proceed at your own risk.
-
----
-
-## Requirements
-
-- Steam Deck OLED or LCD running SteamOS 3.x
-- **ext4** `/home` partition (not BTRFS)
-- [CryoUtilities](https://github.com/CryoByte33/steam-deck-utilities) installed and applied:
-  - `vm.swappiness = 1`
-  - Swapfile ≥ 16 GiB (20 GiB recommended)
-- BIOS settings (enter with **Vol+ + Power** at boot):
-  - **Quick Boot → Disabled**
-  - **UMA Frame Buffer Size → 1G** (not 4G, not Auto)
-
----
-
-## Setup
-
-### 1. Download the script
+После обновления SteamOS откройте Konsole в каталоге проекта и выполните:
 
 ```bash
-mkdir -p ~/.local/bin
-curl -o ~/.local/bin/steamdeck-hibernate.sh \
-  https://raw.githubusercontent.com/bseleng/steam-deck-hibbernation-all-in-one/main/steamdeck-hibernate.sh
-chmod +x ~/.local/bin/steamdeck-hibernate.sh
-cd ~/.local/bin
+sudo ./steamdeck-hibernate.sh
 ```
 
-### 2. Verify prerequisites
+Скрипт проверит и восстановит настройки. По умолчанию обычный сон переходит в гибернацию через **60 минут**. При изменении параметров загрузки он сообщит, что нужна перезагрузка; сам устройство не перезагружает и в сон не отправляет. До перезагрузки сохраняется обычный suspend, после неё служба повторного применения включает автоматическую гибернацию. Если обновление удалило саму службу, повторите эту же команду вручную.
+
+Поддерживается **Steam Deck LCD/OLED, SteamOS, ext4 `/home`, `/home/swapfile` от 16 GiB**. BTRFS и другие дистрибутивы скрипт отклоняет. Работа на реальном Deck ещё требует проверки: локальные тесты моделируют систему и загрузчик, но не доказывают успешное аппаратное возобновление.
+
+## Запуск и параметры
+
+Весь каталог можно скопировать на Deck. Для работы достаточно трёх файлов рядом:
+
+- `steamdeck-hibernate.sh` — основной исполняемый файл;
+- `steamdeck-hibernate-apply.sh` — применение и проверка настроек;
+- `steamdeck-boot-success.sh` — исправление счётчика загрузчика.
+
+Файлы уже сделаны исполняемыми. Если способ копирования потерял права, выполните `chmod +x steamdeck-*.sh`.
 
 ```bash
-sudo ./steamdeck-hibernate.sh check-prereqs
+sudo ./steamdeck-hibernate.sh --dry-run       # показать изменения, ничего не записывать
+sudo ./steamdeck-hibernate.sh --check         # только проверить; 0 = проверки пройдены
+sudo ./steamdeck-hibernate.sh --delay 90min    # применить и запомнить задержку
+sudo ./steamdeck-hibernate.sh --no-sth        # сохранить обычный suspend
+sudo ./steamdeck-hibernate.sh --enable-sth    # вернуть автоматический переход в hibernate
 ```
 
-Checks CryoUtilities settings, swapfile size, UMA buffer, and required tools. Fix any failures before continuing.
+`apply`, `install`, `reapply` — совместимые имена одного режима. `check`, `status`, `self-test`, `check-prereqs` вызывают новую проверку `--check`. Проверка останавливается на первой неисправности и возвращает ненулевой код; после исправления её можно повторить. `--yes` принимается для совместимости, интерактивных подтверждений нет.
 
-### 3. Install
+Задержка, размер для создания swap и выбор автоматического перехода сохраняются в root-owned `/var/lib/steamdeck-hibernate/settings`. На самом первом запуске новой версии задержку при необходимости укажите явно: старый `sleep.conf` не используется как файл состояния. Последующие запуски и запуск при загрузке сохраняют выбранные значения.
 
-```bash
-sudo ./steamdeck-hibernate.sh install
-```
+Существующий swap **не пересоздаётся, не увеличивается и не дефрагментируется**. Файл от 16 GiB сохраняется, даже если его размер отличается от значения по умолчанию 20 GiB. Недостаточный размер требует отдельного изменения через CryoUtilities; автоматической перезаписи активного swap нет. Если файла вообще нет, обычный запуск создаёт 20 GiB при достаточном свободном месте; `--size 24` задаёт размер нового файла. Для отсутствующего swap полный `--dry-run` невозможен: физический offset ещё не существует, поэтому скрипт сообщает это и завершает проверку без записи.
 
-Applies: swapfile, GRUB resume parameters, logind memory-check bypass, sleep config, Bluetooth fix, GRUB boot counter fix, and boot-time reapply service.
+CryoUtilities устанавливать или заново применять целиком не требуется. Скрипт восстанавливает `vm.swappiness=1` отдельным sysctl drop-in, но не применяет весь набор настроек производительности CryoUtilities. Сами исходники CryoUtilities сохранены для сверки.
 
-### 4. Reboot
+## Почему появлялись Failed to boot и Previous
 
-```bash
-sudo reboot
-```
+В старом скрипте менялся **GRUB `boot_counter`**, а SteamOS учитывает **`boot-attempts` в конфигурации EFI-загрузчика**. Кроме того, старый хук находился в `/etc/systemd/system-sleep/`, который штатный systemd не использует для этих хуков.
 
-The kernel resume parameters only take effect after reboot.
+В сохранённой версии [исходников загрузчика](https://github.com/evlaV/steamos-efi/blob/091ac90010ab6d073f34b6f4f152aca9cf365eda/chainloader/bootload.c) порог 3 вызывает меню, а 6 позволяет выбрать другой образ. Флаг `image-invalid` понижает приоритет образа. Это объясняет накопление отказов и выделение Previous на фотографии; окончательное подтверждение для установленной на Deck версии требует проверки на устройстве.
 
-### 5. Verify logic (read-only, no hardware needed)
+Новый helper использует штатный `steamos-bootconf` или `holo-bootconf` и определяет работающий образ через `this-image`, без привязки к A/B или позиции меню. После успешного ручного применения и после успешного возврата sleep service он обнуляет `boot-attempts` и снимает `image-invalid` у работающего образа, затем проверяет результат чтением. Другой слот, `boot-requested-at` и `boot-other` сохраняются: подготовленное обновление SteamOS продолжает выбирать свой образ. Порядок меню не закрепляется искусственно — Current/Previous могут закономерно меняться при обновлениях.
 
-```bash
-sudo ./steamdeck-hibernate.sh self-test
-```
+Обычный запуск boot-службы восстанавливает конфигурацию, но сам по себе не объявляет раннюю загрузку успешной. Отметка успеха ставится ручным применением после проверок либо после возвращения из сна.
 
-Validates UUID, resume offset, GRUB parameters, and sleep config without touching anything.
+## Что восстанавливается
 
-### 6. Test suspend
-
-```bash
-sudo ./steamdeck-hibernate.sh test-suspend
-```
-
-Suspends for 20 seconds via RTC alarm. Detects immediate-wake issues and analyses the wakeup source.
-
-**If the deck wakes immediately** (common after SteamOS updates):
-
-```bash
-sudo ./steamdeck-hibernate.sh fix-wifi-wake
-# reboot, then test-suspend again
-# if still waking:
-sudo ./steamdeck-hibernate.sh disable-all-wakeup
-```
-
-### 7. Test hibernation
-
-```bash
-sudo ./steamdeck-hibernate.sh test-hibernate
-```
-
-Triggers a real hibernation. The deck powers off — press the power button to resume. Confirm Bluetooth and display work correctly after resume.
-
-### 8. Enable suspend-then-hibernate
-
-```bash
-sudo ./steamdeck-hibernate.sh enable-sth
-```
-
-From this point, every suspend (lid close / sleep button) will suspend first, then automatically hibernate after **60 minutes** (configurable with `--delay`).
-
----
-
-## All commands
-
-| Command | Description |
+| Область | Действие |
 |---|---|
-| `check-prereqs` | Verify CryoUtilities, UMA, swapfile, tools |
-| `install` | Apply all hibernation config |
-| `self-test` | Read-only logic checks after install + reboot |
-| `test-suspend` | Suspend via RTC alarm, detect immediate-wake |
-| `test-hibernate` | Trigger real hibernation |
-| `enable-sth` | Make every suspend = suspend-then-hibernate |
-| `disable-sth` | Revert to plain suspend |
-| `fix-swapfile` | Recreate swapfile as a single contiguous extent (then reboot) |
-| `fix-wifi-wake` | Disable WiFi/XHC wakeup, check mem_sleep mode |
-| `fix-wake <DEV>` | Disable one specific ACPI wakeup device |
-| `disable-all-wakeup` | Nuclear: disable all wakeup except power button |
-| `diagnose-wake` | Full PM log + ACPI wakeup analysis |
-| `status` | Show state of every component |
-| `reapply` | Re-apply config (used after SteamOS updates) |
-| `bios-tips` | Print BIOS settings guide |
-| `install-cec` | TV off via HDMI-CEC on sleep (dock users) |
-| `uninstall` | Remove all changes (swapfile is kept) |
+| Swap | Проверка подписи и размера, права root:root 0600, активация и запись в fstab |
+| Resume | UUID файловой системы и offset заголовка swap в единицах PAGE_SIZE |
+| GRUB | Замена только `resume=`/`resume_offset=`, сохранение остальных аргументов, регенерация и проверка результата |
+| Сон | Собственный `zzz-steamdeck-hibernate.conf`, без перезаписи основного `sleep.conf` |
+| logind / sleep units | Собственные drop-ins с обходом проверки размера swap |
+| Suspend | Собственный override с проверкой готовности перед каждым уходом в сон |
+| Загрузчик | `ExecStartPost` для успешного возврата hibernate/STH/suspend |
+| Bluetooth OLED | Проверка контроллера без включения discoverable; восстановление QCA только при сбое работающего Bluetooth |
+| Swappiness | Собственный sysctl drop-in и значение 1 в текущей системе |
+| Повторное применение | Root-owned копии скриптов и служба `steamdeck-hibernate-reapply.service` |
 
-**Flags:**
+Расположение реально используемого `grub.cfg` определяется по штатной `update-grub` и известным путям SteamOS; stub в `/boot/grub` не должен подменять проверку EFI-конфигурации. Ошибка генерации или отсутствие нужных параметров приводит к ненулевому коду и восстановлению предыдущих GRUB defaults и generated config.
 
-```
---delay <D>    Time in suspend before hibernating (default: 60min, e.g. 2h, 90min)
---size <N>     Swapfile size in GiB (default: 20)
---dry-run      Print what would happen, change nothing
---yes          Skip confirmation prompts
-```
+В новых SteamOS собственная подготовка временного swap (`hibernate-prepare.service`) пропускается, пока существуют настройки этого скрипта: иначе она могла бы переключить runtime resume на другой файл. При оставшейся native metadata или активном временном swap применение останавливается до записи файлов. Штатные swap-службы и cleanup-хук не удаляются. Политика сна при питании от сети (`HibernateOnACPower`) остаётся системной: на версиях с `HibernateOnACPower=no` таймер гибернации отсчитывается только без внешнего питания.
 
----
+Старый symlink `systemd-suspend.service → systemd-suspend-then-hibernate.service` мигрируется в override. Неизвестные пользовательские unit overrides скрипт не заменяет. Эффективная конфигурация сна проверяется через `systemd-analyze cat-config`, поэтому более поздний drop-in, запрещающий hibernate или меняющий задержку, приводит к явной ошибке.
 
-## After SteamOS updates
+Перед каждым перенаправленным suspend проверяются swap и параметры работающего ядра. Если они больше не подходят, выполняется обычный suspend. Для прямого hibernate/STH используется `ExecCondition`. Таким образом, оставшийся после неудачного обновления override не должен отправлять систему в гибернацию с устаревшим offset.
 
-SteamOS updates overwrite `/etc/default/grub` and `/etc/systemd/sleep.conf`. A boot-time reapply service handles this automatically. If hibernation stops working after an update:
+Скрипт работает с `/etc`, `/var/lib` и EFI-конфигурацией, не отключая `steamos-readonly` и не изменяя `/usr`. Первые версии заменяемых файлов сохраняются в `/var/lib/steamdeck-hibernate/backups/`. Это резервные копии для ручного восстановления, а не обещание полного автоматического отката всех изменений. Старые небезопасные команды пересоздания swap и старый uninstall не поддерживаются новым entrypoint; исходная версия находится в `legacy/` для изучения.
+
+## Проверка на Steam Deck
+
+После первого применения и требуемой перезагрузки:
 
 ```bash
-sudo ./steamdeck-hibernate.sh reapply --yes
-sudo reboot
+sudo ./steamdeck-hibernate.sh --check
+sudo /var/lib/steamdeck-hibernate/steamdeck-boot-success.sh --check
 ```
 
----
+Сначала сохраните важные данные и вручную проверьте один цикл `sudo systemctl hibernate`: устройство должно восстановить прежнюю сессию, экран и Bluetooth. Затем проверьте не менее 12 циклов и отсутствие роста `boot-attempts` после каждого, после чего проверьте переход из suspend по заданной задержке. Это проверка на оборудовании, которую контейнерные тесты заменить не могут.
 
-## Troubleshooting
+BIOS параметры из исходного руководства (Quick Boot Disabled и UMA 1G) проверяются вручную. Скрипт прошивку не меняет. Initramfs автоматически не пересобирается: при холодной загрузке вместо resume нужны отдельная проверка kernel/initrd resume и журналов. Изменение offset требует перезагрузки; несколько extents сами по себе не означают неисправный swap.
 
-**"sleep verb 'hibernate' is disabled by config"**
-A SteamOS vendor drop-in is overriding `AllowHibernation=yes`. Run `reapply` — it writes `zzz-steamdeck-hibernate.conf` which sorts last and wins.
+Журналы:
 
-**Deck wakes immediately after suspend**
-Run `fix-wifi-wake`. If that doesn't help, run `disable-all-wakeup`. Check `cat /sys/power/mem_sleep` — it must show `[deep]`, not `[s2idle]`.
-
-**Bluetooth devices don't reconnect after hibernate**
-The `fix-bluetooth-resume` service handles this automatically. Check it ran:
 ```bash
-journalctl -u fix-bluetooth-resume.service --since "-5 min"
+journalctl -b -u steamdeck-hibernate-reapply.service
+journalctl -b -u systemd-suspend.service -u systemd-hibernate.service -u systemd-suspend-then-hibernate.service
 ```
 
-**"Failed to boot" screen after several hibernation cycles**
-The GRUB boot counter fix (installed by default) prevents this. If it appears anyway, select "Current" — it is cosmetic.
+## Исходники и локальные тесты
 
-**Deck boots fresh instead of resuming session (resume fails silently)**
-The swapfile is likely fragmented. `self-test` will report the extent count. Fix:
+В `upstream/` находятся оригинальный скрипт, CryoUtilities, руководство по гибернации, исходники EFI-загрузчика и системных настроек SteamOS. Адреса, ревизии и назначение: [upstream/SOURCES.md](upstream/SOURCES.md). Они подключены как Git submodules с закреплёнными ревизиями. Чтобы скачать проект вместе с исходными репозиториями:
+
 ```bash
-sudo ./steamdeck-hibernate.sh fix-swapfile
-sudo reboot
+git clone --recurse-submodules https://github.com/bseleng/steam-deck-hibbernation-all-in-one.git
 ```
-Requires ~20 GiB free on `/home`. After recreation the `resume_offset` changes — GRUB is updated automatically, but a reboot is required.
 
-**Deck won't resume from hibernate (black screen)**
-Hold power for 10 seconds to force reboot. The hibernation image is discarded and the deck boots normally. This is recoverable.
+Для уже скачанного проекта: `git submodule update --init --recursive`. Исходная версия самого all-in-one сохранена отдельным submodule на старом коммите, поэтому рекурсивной зависимости от новой версии нет. Применение настроек не требует сети и не выполняет установщики исходных проектов.
 
----
+```bash
+bash tests/test_apply.sh
+bash tests/test_boot_success.sh
+```
 
-## What the script changes
+Полный тест применения использует файловую систему **одноразового Linux-контейнера**, подменяя аппаратные и системные команды. На Steam Deck этот тест запускать нельзя:
 
-| File / location | What |
-|---|---|
-| `/etc/default/grub` | Adds `resume=UUID resume_offset=N` kernel params |
-| `/etc/systemd/sleep.conf` | Sets `AllowHibernation=yes`, `HibernateDelaySec` |
-| `/etc/systemd/sleep.conf.d/zzz-steamdeck-hibernate.conf` | Overrides vendor `AllowHibernation=no` drop-in |
-| `/etc/systemd/system/systemd-logind.service.d/override.conf` | Sets `SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK=1` |
-| `/etc/systemd/system/fix-bluetooth-resume.service` | Rebinds BT driver after resume |
-| `/etc/systemd/system-sleep/steamdeck-fix-boot-counter.sh` | Resets GRUB boot counter after hibernate |
-| `/etc/systemd/system/steamdeck-hibernate-reapply.service` | Re-applies config at boot after SteamOS updates |
-| `/var/lib/steamdeck-hibernate/` | Script copy + BT fix script |
-| `/home/swapfile` | 20 GiB swapfile (created if missing) |
+```bash
+docker run --rm --network none \
+  -e STEAMDECK_TEST_CONTAINER=1 \
+  -v "$PWD:/project:ro" -w /project \
+  node:24.22.2-bookworm-slim bash tests/test_linux_integration.sh
+```
 
-`uninstall` removes all of the above except the swapfile.
+Он проверяет повторное применение, восстановление после моделируемого обновления, сохранение настроек, отсутствие записи в dry-run, ошибки GRUB/systemd, runtime guard, эффективные настройки сна и исправление текущего слота без изменения другого.

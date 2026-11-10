@@ -1,0 +1,15 @@
+[submodule "upstream/publications"]
+	path = upstream/publications
+	url = https://github.com/nazar256/publications.git
+[submodule "upstream/steam-deck-utilities"]
+	path = upstream/steam-deck-utilities
+	url = https://github.com/CryoByte33/steam-deck-utilities.git
+[submodule "upstream/steam-deck-hibbernation-all-in-one"]
+	path = upstream/steam-deck-hibbernation-all-in-one
+	url = https://github.com/bseleng/steam-deck-hibbernation-all-in-one.git
+[submodule "upstream/steamos-efi"]
+	path = upstream/steamos-efi
+	url = https://github.com/evlaV/steamos-efi.git
+[submodule "upstream/steamos-customizations"]
+	path = upstream/steamos-customizations
+	url = https://github.com/evlaV/steamos-customizations.git
